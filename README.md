@@ -17,6 +17,26 @@ A read-only [MCP](https://modelcontextprotocol.io) server, written in Go, that l
 
 All tools are read-only, so no CSRF crumb is needed. Crumb handling will be added with the first tool that changes something, such as triggering a build.
 
+## Debugging failed builds
+
+| Priority | Tool | Jenkins API | What it answers |
+|---|---|---|---|
+| P0 | `jenkins_get_failed_stages` | `…/{build}/wfapi/describe` | Which Pipeline stage failed, with its error, plus every stage's status and duration |
+| P0 | `jenkins_get_stage_details` | `…/execution/node/{id}/wfapi/describe` | The steps of one stage (by name or id): command, status, duration, error, agent |
+| P0 | `jenkins_get_failed_step_logs` | `…/wfapi/describe?fullStages=true` + `…/execution/node/{id}/wfapi/log` | **The actual error output**: the end of each failed step's log, with its command |
+| P0 | `jenkins_get_test_results` | `…/{build}/testReport/api/json` (small projection) | Totals, new failures (regressions), fixed tests, and the suites with the most failures |
+| P0 | `jenkins_get_test_failures` | `…/{build}/testReport/api/json` | Failed tests with error, trimmed stack trace and age. New failures come first. Filter with `search` |
+| P1 | `jenkins_compare_builds` | build `api/json` ×2 + `wfapi` + `testReport` | Good vs bad build (default `lastSuccessfulBuild` vs `lastBuild`): result, duration, **parameter changes**, Git commit, agent, per-stage status, tests, and the **commits in between** |
+| P1 | `jenkins_get_build_changes` | build `api/json` (`changeSets`, `culprits`) | Commits a build picked up: author, time, message, changed files; plus culprits and the Git revision |
+
+Notes:
+- The `build` input defaults to `lastBuild`; use `lastFailedBuild` for the latest failure. A permalink is resolved to a number once, so every call reads the same build.
+- **Requirements:**
+  - The stage tools need the **Pipeline Stage View** plugin (`wfapi`), which is installed with the suggested plugins. On a freestyle job, or without the plugin, they return `not_found` with that explanation.
+  - The test tools need the job to publish **JUnit** results (`junit '**/target/*.xml'`). Without them they return `not_found`.
+- **Step logs:** Jenkins' `wfapi/log` returns about **the last 10 KB** of a step's output, as HTML (the limit can be changed with the `com.cloudbees.workflow.rest.external.FlowNodeLogExt.maxReturnChars` system property). The tool converts it to plain text and sets `logTruncated`. Use `jenkins_get_console_logs` for the full log.
+- **Suggested flow for "why did it fail?":** `jenkins_get_failed_stages` → `jenkins_get_failed_step_logs` → `jenkins_get_test_failures` (if tests failed) → `jenkins_compare_builds` (what changed since the last green build).
+
 ## Images a build produced (`jenkins_get_build_images`)
 
 The tool reads the **end of the console log** (default 4 MiB, `scanBytes` up to 32 MiB) and small image or digest artifacts, and recognizes:
