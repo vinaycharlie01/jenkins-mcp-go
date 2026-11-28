@@ -161,7 +161,7 @@ func TestToolsRegisteredReadOnly(t *testing.T) {
 			t.Errorf("description should name the base folder: %s", tl.Description)
 		}
 	}
-	want := "jenkins_get_build_history,jenkins_get_build_images,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_list_jobs,jenkins_whoami"
+	want := "jenkins_analyze_build_logs,jenkins_get_build_history,jenkins_get_build_images,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_list_jobs,jenkins_whoami"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("%v", names)
 	}
