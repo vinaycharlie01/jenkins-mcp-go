@@ -1,0 +1,25 @@
+{
+  // Open this folder in VS Code, then start "jenkins" from "MCP: List Servers".
+  // VS Code prompts for the values below; the session is stored as a secret.
+  "inputs": [
+    { "type": "promptString", "id": "jenkins-url", "description": "Jenkins URL, e.g. https://jenkins.example.com" },
+    { "type": "promptString", "id": "jenkins-base-folder", "description": "Base folder (all job paths are relative to it; empty = root)" },
+    { "type": "promptString", "id": "jenkins-cookie-name", "description": "Session cookie name, e.g. JSESSIONID.1a2b3c4d" },
+    { "type": "promptString", "id": "jenkins-session", "description": "Session cookie value", "password": true }
+  ],
+  "servers": {
+    "jenkins": {
+      "type": "stdio",
+      "command": "go",
+      "args": ["run", "${workspaceFolder}/cmd/server"],
+      "env": {
+        "JENKINS_URL": "${input:jenkins-url}",
+        "JENKINS_BASE_FOLDER": "${input:jenkins-base-folder}",
+        "JENKINS_COOKIE_NAME": "${input:jenkins-cookie-name}",
+        "JENKINS_SESSION": "${input:jenkins-session}",
+        "LOG_LEVEL": "debug",
+        "LOG_FORMAT": "text"
+      }
+    }
+  }
+}

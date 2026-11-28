@@ -1,0 +1,86 @@
+version: '3'
+
+vars:
+  BINARY_NAME: jenkins-mcp
+  DIST_DIR: dist
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  GIT_COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+  LDFLAGS: >-
+    -s -w
+    -X github.com/vinaycharlie01/jenkins-mcp-go/pkg/version.Version={{.VERSION}}
+    -X github.com/vinaycharlie01/jenkins-mcp-go/pkg/version.GitCommit={{.GIT_COMMIT}}
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  build:
+    desc: Build binary for current platform
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}} ./cmd/server
+
+  build-linux:
+    desc: Cross-compile linux/amd64 and linux/arm64 binaries
+    cmds:
+      - mkdir -p {{.DIST_DIR}}/linux_amd64 {{.DIST_DIR}}/linux_arm64
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.DIST_DIR}}/linux_amd64/{{.BINARY_NAME}} ./cmd/server
+      - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.DIST_DIR}}/linux_arm64/{{.BINARY_NAME}} ./cmd/server
+
+  run:
+    desc: Run over stdio (reads JENKINS_* from the environment or .env)
+    dotenv: ['.env']
+    cmds:
+      - go run ./cmd/server
+
+  smoke:
+    desc: Start the server and list its tools over stdio (no Jenkins call is made)
+    dotenv: ['.env']
+    cmds:
+      - task: build
+      - |
+        { printf '%s\n' \
+          '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+          '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+          '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'; sleep 1; } \
+          | {{.DIST_DIR}}/{{.BINARY_NAME}} 2>/dev/null | grep -o '"name":"jenkins_[a-z_]*"'
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -short -timeout=120s ./...
+
+  race:
+    desc: Run tests with race detector
+    cmds:
+      - go test -race -short -timeout=120s ./...
+
+  coverage:
+    desc: Run tests with coverage
+    cmds:
+      - go test -coverprofile=coverage.out -timeout=120s ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run --timeout=10m ./...
+
+  docker:
+    desc: Build the container image
+    cmds:
+      - docker build -t jenkins-mcp:{{.VERSION}} --build-arg VERSION={{.VERSION}} --build-arg GIT_COMMIT={{.GIT_COMMIT}} .
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.DIST_DIR}} coverage.out
