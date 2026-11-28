@@ -26,6 +26,11 @@ type API interface {
 	ConsoleText(ctx context.Context, path []string, ref string, start int64, maxBytes int) (*client.Console, error)
 	Queue(ctx context.Context) ([]client.QueueItem, error)
 	GetArtifact(ctx context.Context, path []string, ref, relativePath string, maxBytes int) ([]byte, bool, error)
+	ResolveBuild(ctx context.Context, path []string, ref string) (int, string, bool, error)
+	DescribeRun(ctx context.Context, path []string, build int, fullStages bool) (*client.PipelineRun, error)
+	DescribeNode(ctx context.Context, path []string, build int, nodeID string) (*client.Stage, error)
+	NodeLogTail(ctx context.Context, path []string, build int, nodeID string) (*client.NodeLog, error)
+	TestReport(ctx context.Context, path []string, build int, tree string) (*client.TestReport, error)
 }
 
 // Options configures optional tool behaviour.
@@ -108,6 +113,7 @@ func (t *Tools) Register(s *mcp.Server) {
 			"build parameters, display name and Git commit as hints. Pass the returned 'expected' list to argocd_get_images to verify what Argo CD runs.",
 		Annotations: readOnly,
 	}, t.getBuildImages)
+	t.registerDebugTools(s)
 	t.registerAnalyzeBuildLogs(s)
 }
 

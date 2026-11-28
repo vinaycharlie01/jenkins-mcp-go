@@ -21,6 +21,13 @@ type fakeAPI struct {
 	queue    []client.QueueItem
 	who      *client.WhoAmI
 	files    map[string]string
+	builds   map[string]*client.Build
+	resolved map[string]int
+	runs     map[int]*client.PipelineRun
+	nodes    map[string]*client.Stage
+	nodeLogs map[string]*client.NodeLog
+	reports  map[int]*client.TestReport
+	trees    []string
 	refs     []string
 	err      error
 	calls    int
@@ -59,8 +66,64 @@ func (f *fakeAPI) GetJob(_ context.Context, p []string) (*client.Job, error) {
 func (f *fakeAPI) GetBuild(_ context.Context, p []string, ref string) (*client.Build, error) {
 	f.calls++
 	f.path, f.ref = p, ref
+	if b, ok := f.builds[ref]; ok {
+		return b, nil
+	}
+	if f.builds != nil && f.build == nil {
+		return nil, &client.APIError{Status: 404, Reason: "x"}
+	}
 
 	return f.build, f.err
+}
+
+func (f *fakeAPI) ResolveBuild(_ context.Context, p []string, ref string) (int, string, bool, error) {
+	f.calls++
+	f.path = p
+	if f.err != nil {
+		return 0, "", false, f.err
+	}
+	if n, ok := f.resolved[ref]; ok {
+		return n, "FAILURE", false, nil
+	}
+
+	return 42, "FAILURE", false, nil
+}
+
+func (f *fakeAPI) DescribeRun(_ context.Context, _ []string, build int, _ bool) (*client.PipelineRun, error) {
+	f.calls++
+	if r, ok := f.runs[build]; ok {
+		return r, nil
+	}
+
+	return nil, &client.APIError{Status: 404, Reason: "no Pipeline stage data"}
+}
+
+func (f *fakeAPI) DescribeNode(_ context.Context, _ []string, _ int, id string) (*client.Stage, error) {
+	f.calls++
+	if n, ok := f.nodes[id]; ok {
+		return n, nil
+	}
+
+	return nil, &client.APIError{Status: 404, Reason: "x"}
+}
+
+func (f *fakeAPI) NodeLogTail(_ context.Context, _ []string, _ int, id string) (*client.NodeLog, error) {
+	f.calls++
+	if l, ok := f.nodeLogs[id]; ok {
+		return l, nil
+	}
+
+	return &client.NodeLog{NodeID: id}, nil
+}
+
+func (f *fakeAPI) TestReport(_ context.Context, _ []string, build int, tree string) (*client.TestReport, error) {
+	f.calls++
+	f.trees = append(f.trees, tree)
+	if r, ok := f.reports[build]; ok {
+		return r, nil
+	}
+
+	return nil, &client.APIError{Status: 404, Reason: "no test report for this build (JUnit results were not published)"}
 }
 
 func (f *fakeAPI) BuildHistory(_ context.Context, p []string, limit int) ([]client.BuildSummary, error) {
@@ -161,7 +224,7 @@ func TestToolsRegisteredReadOnly(t *testing.T) {
 			t.Errorf("description should name the base folder: %s", tl.Description)
 		}
 	}
-	want := "jenkins_analyze_build_logs,jenkins_get_build_history,jenkins_get_build_images,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_list_jobs,jenkins_whoami"
+	want := "jenkins_analyze_build_logs,jenkins_compare_builds,jenkins_get_build_changes,jenkins_get_build_history,jenkins_get_build_images,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_failed_stages,jenkins_get_failed_step_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_get_stage_details,jenkins_get_test_failures,jenkins_get_test_results,jenkins_list_jobs,jenkins_whoami"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("%v", names)
 	}

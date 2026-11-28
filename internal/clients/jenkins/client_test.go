@@ -282,3 +282,64 @@ func TestGetArtifact(t *testing.T) {
 		}
 	}
 }
+
+func TestPipelineEndpoints(t *testing.T) {
+	var paths []string
+	c, _ := newClient(t, []string{"TeamA"}, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.EscapedPath()+"?"+r.URL.RawQuery)
+		switch r.URL.EscapedPath() {
+		case "/job/TeamA/job/svc/lastFailedBuild/api/json":
+			writeJSON(w, `{"number":42,"result":"FAILURE","building":false}`)
+		case "/job/TeamA/job/svc/42/wfapi/describe":
+			writeJSON(w, `{"id":"42","status":"FAILED","durationMillis":5000,"stages":[
+				{"id":"6","name":"Build","status":"SUCCESS","durationMillis":1000},
+				{"id":"15","name":"Test","status":"FAILED","error":{"message":"script returned exit code 1","type":"hudson.AbortException"},
+				 "stageFlowNodes":[{"id":"17","name":"Shell Script","status":"FAILED","parameterDescription":"make test","parentNodes":["15"]}]}]}`)
+		case "/job/TeamA/job/svc/42/execution/node/15/wfapi/describe":
+			writeJSON(w, `{"id":"15","name":"Test","status":"FAILED","stageFlowNodes":[{"id":"17","name":"Shell Script","status":"FAILED"}]}`)
+		case "/job/TeamA/job/svc/42/execution/node/17/wfapi/log":
+			writeJSON(w, `{"nodeId":"17","nodeStatus":"FAILED","length":10240,"hasMore":true,"text":"<span class=\"timestamp\">12:00</span> FAIL: TestX &amp; TestY\nexit 1\n"}`)
+		case "/job/TeamA/job/svc/42/testReport/api/json":
+			writeJSON(w, `{"failCount":1,"passCount":9,"skipCount":0,"suites":[{"name":"pkg","cases":[{"className":"pkg.A","name":"TestX","status":"REGRESSION","age":1}]}]}`)
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	ctx := context.Background()
+	n, res, _, err := c.ResolveBuild(ctx, []string{"svc"}, "lastFailedBuild")
+	if err != nil || n != 42 || res != "FAILURE" {
+		t.Fatalf("%v %d %s", err, n, res)
+	}
+	run, err := c.DescribeRun(ctx, []string{"svc"}, n, true)
+	if err != nil || len(run.Stages) != 2 || run.Stages[1].Error.Message != "script returned exit code 1" || run.Stages[1].StageFlowNodes[0].ParameterDescription != "make test" {
+		t.Fatalf("%v %+v", err, run)
+	}
+	if !strings.HasSuffix(paths[len(paths)-1], "?fullStages=true") {
+		t.Fatalf("fullStages missing: %v", paths)
+	}
+	st, err := c.DescribeNode(ctx, []string{"svc"}, n, "15")
+	if err != nil || st.StageFlowNodes[0].ID != "17" {
+		t.Fatalf("%v %+v", err, st)
+	}
+	l, err := c.NodeLogTail(ctx, []string{"svc"}, n, "17")
+	if err != nil || l.Text != "12:00 FAIL: TestX & TestY\nexit 1\n" || !l.HasMore {
+		t.Fatalf("HTML must become plain text: %v %q", err, l.Text)
+	}
+	if _, err := c.DescribeNode(ctx, []string{"svc"}, n, "../1"); err == nil {
+		t.Fatal("bad node id accepted")
+	}
+	tr, err := c.TestReport(ctx, []string{"svc"}, n, TestTreeFailed)
+	if err != nil || tr.FailCount != 1 || tr.Suites[0].Cases[0].Status != "REGRESSION" {
+		t.Fatalf("%v %+v", err, tr)
+	}
+	if !strings.Contains(paths[len(paths)-1], "tree=") {
+		t.Fatalf("tree projection missing: %s", paths[len(paths)-1])
+	}
+	// 404s get explanatory messages.
+	if _, err := c.TestReport(ctx, []string{"svc"}, 7, TestTreeCounts); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "JUnit") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := c.DescribeRun(ctx, []string{"svc"}, 7, false); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "wfapi") {
+		t.Fatalf("%v", err)
+	}
+}

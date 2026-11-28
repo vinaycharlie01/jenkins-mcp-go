@@ -101,16 +101,27 @@ type Build struct {
 		} `json:"lastBuiltRevision,omitempty"`
 		RemoteURLs []string `json:"remoteUrls,omitempty"`
 	} `json:"actions,omitempty"`
-	Artifacts  []Artifact `json:"artifacts,omitempty"`
-	ChangeSets []struct {
-		Items []struct {
-			CommitID string `json:"commitId"`
-			Msg      string `json:"msg"`
-			Author   struct {
-				FullName string `json:"fullName"`
-			} `json:"author"`
-		} `json:"items"`
-	} `json:"changeSets,omitempty"`
+	Artifacts  []Artifact  `json:"artifacts,omitempty"`
+	ChangeSets []ChangeSet `json:"changeSets,omitempty"`
+	// ChangeSet is the freestyle-job form of ChangeSets.
+	ChangeSet *ChangeSet `json:"changeSet,omitempty"`
+	Culprits  []struct {
+		FullName string `json:"fullName"`
+	} `json:"culprits,omitempty"`
+}
+
+// ChangeSet is the SCM changes of one checkout in a build.
+type ChangeSet struct {
+	Kind  string `json:"kind,omitempty"`
+	Items []struct {
+		CommitID  string `json:"commitId"`
+		Msg       string `json:"msg"`
+		Timestamp int64  `json:"timestamp,omitempty"`
+		Author    struct {
+			FullName string `json:"fullName"`
+		} `json:"author"`
+		AffectedPaths []string `json:"affectedPaths,omitempty"`
+	} `json:"items"`
 }
 
 // Artifact is an archived build artifact.
@@ -164,7 +175,9 @@ const (
 		"property[parameterDefinitions[_class,name,type,description,choices,defaultParameterValue[value]]]," + jobsTree
 	buildTree = "_class,number,url,displayName,description,result,building,duration,estimatedDuration,timestamp,builtOn," +
 		"actions[_class,parameters[name,value],causes[shortDescription,userId,userName],lastBuiltRevision[SHA1,branch[name]],remoteUrls]," +
-		"changeSets[items[commitId,msg,author[fullName]]],artifacts[fileName,relativePath]{0,200}"
+		"changeSets[kind,items[commitId,msg,timestamp,author[fullName],affectedPaths]]," +
+		"changeSet[kind,items[commitId,msg,timestamp,author[fullName],affectedPaths]]," +
+		"culprits[fullName],artifacts[fileName,relativePath]{0,200}"
 	historyTreeFmt = "builds[number,url,displayName,result,building,timestamp,duration]{0,%d}"
 	queueTree      = "items[id,why,blocked,buildable,stuck,inQueueSince,params,task[name,url]]"
 )
