@@ -91,3 +91,15 @@ func TestSplitJobPath(t *testing.T) {
 		}
 	}
 }
+
+func TestImagePattern(t *testing.T) {
+	c, err := LoadFrom(env(jenkinsEnv(map[string]string{"JENKINS_IMAGE_PATTERN": `IMG=(?P<image>\S+)`})))
+	if err != nil || c.Jenkins.ImagePattern == nil {
+		t.Fatalf("%v", err)
+	}
+	for _, bad := range []string{`(?P<image>[`, `no-groups`} {
+		if _, err := LoadFrom(env(jenkinsEnv(map[string]string{"JENKINS_IMAGE_PATTERN": bad}))); err == nil || !strings.Contains(err.Error(), "JENKINS_IMAGE_PATTERN") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}

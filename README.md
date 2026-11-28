@@ -13,8 +13,48 @@ A read-only [MCP](https://modelcontextprotocol.io) server, written in Go, that l
 | `jenkins_get_build_history` | `…/api/json?tree=builds[…]{0,N}` | Recent builds, newest first |
 | `jenkins_get_console_logs` | `…/{build}/logText/progressiveText` | Console output. **The default is the end of the log**, where failures are. Pass `start` to page forward with `nextStart`. Up to 1 MB per call |
 | `jenkins_get_queue_info` | `/queue/api/json` | Queued builds in the base folder and why they're waiting |
+| `jenkins_get_build_images` | build `api/json` + console tail + artifacts | **Images the build pushed**: repository, tag, **registry digest**, evidence line, and an `expected` list ready for `argocd_get_images` |
 
 All tools are read-only, so no CSRF crumb is needed. Crumb handling will be added with the first tool that changes something, such as triggering a build.
+
+## Images a build produced (`jenkins_get_build_images`)
+
+The tool reads the **end of the console log** (default 4 MiB, `scanBytes` up to 32 MiB) and small image or digest artifacts, and recognizes:
+
+| Tool | Log line | Gives |
+|---|---|---|
+| `docker push` | `The push refers to repository [r/app]` … `1.4.2: digest: sha256:… size: …` | tag + digest |
+| `docker buildx` / BuildKit | `pushing manifest for r/app:1.4.2@sha256:…` | tag + digest |
+| Kaniko | `Pushing image to r/app:1.4.2` … `Pushed r/app@sha256:…` | tag + digest |
+| Jib | `Built and pushed image as r/app:1.4.2` (+ a `jib-image.digest` artifact if archived) | tag (+ digest) |
+| `docker build` (not pushed) | `Successfully tagged …` / `naming to …` | tag, marked `pushed: false` |
+| Your pipeline | `JENKINS_IMAGE_PATTERN` (see below) | whatever your pattern captures |
+
+- Base images (`FROM node@sha256:…`) and `docker pull` digests are **not** reported.
+- Artifacts whose path looks like `*digest*.txt`, `*image*.json` or `*.digest` are read, up to 5 files of 64 KiB each.
+- Build parameters named like `IMAGE`, `TAG`, `VERSION`, `DIGEST` or `SHA`, plus the display name and the Git commit, are returned as **hints**.
+
+### Comparing with Argo CD
+
+The output includes `expected`, which is exactly the input [`argocd_get_images`](https://github.com/vinaycharlie01/argocd-mcp-go) takes. With both MCP servers connected, ask:
+
+> *"Is the image from Jenkins build 42 of payments/main running in Argo CD app payments?"*
+
+Argo CD then answers `MATCH`, `MIXED_ROLLOUT`, `TAG_MATCH_DIGEST_DIFFERENT`, `DIFFERENT_TAG`, and so on, by comparing **digests** rather than only tags.
+
+### Custom pattern (`JENKINS_IMAGE_PATTERN`)
+
+If your pipeline prints images differently, add one line to `.env`. The pattern is a Go regular expression with named groups `image`, plus optional `tag` and `digest`:
+
+```bash
+# Pipeline prints: PUBLISHED registry.example.com/team/svc:1.2.3 sha256:abc...
+JENKINS_IMAGE_PATTERN=PUBLISHED (?P<image>\S+) (?P<digest>sha256:[0-9a-f]{64})
+```
+
+The pattern is validated at startup, so an invalid one stops the server with a clear error.
+
+> [!TIP]
+> To get digests reliably, make the pipeline print them, for example `docker push` (which already prints them), `docker buildx build --push`, `crane digest <image>`, or archive an `image-digest.txt`.
 
 ## Base folder and job paths
 
@@ -136,6 +176,7 @@ docker run -i --rm --env-file .env jenkins-mcp:dev
 | `JENKINS_CA_FILE` | — | Extra CA bundle (PEM) |
 | `JENKINS_INSECURE` | `false` | Skip TLS verification (lower environments only) |
 | `JENKINS_REQUEST_TIMEOUT` | `30s` | Per-request timeout |
+| `JENKINS_IMAGE_PATTERN` | — | Optional regex with named groups `image`, `tag`, `digest` for custom image output |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | `json` or `text`. Logs go to stderr, because stdout carries the MCP stream |
 
@@ -165,6 +206,8 @@ internal/config/           environment loading and validation, job-path parsing
 internal/auth/jenkins/     Authenticator: session cookie or API token (static or file)
 internal/clients/jenkins/  REST client: base-folder scoping, tree projections, console paging
 internal/tools/jenkins/    MCP tool definitions, input validation, response shaping
+internal/imageref/         image reference parsing/normalization (tag, registry digest)
+internal/imagescan/        finds pushed images in console logs and artifacts
 internal/toolkit/          error envelope and validators
 internal/mcp/              builds the MCP server from tool sets
 internal/transport/        stdio (an HTTP transport can be added here)

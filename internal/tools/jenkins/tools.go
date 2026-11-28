@@ -4,11 +4,13 @@ package jenkins
 import (
 	"context"
 	"errors"
+	"regexp"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	authjenkins "github.com/vinaycharlie01/jenkins-mcp-go/internal/auth/jenkins"
 	client "github.com/vinaycharlie01/jenkins-mcp-go/internal/clients/jenkins"
+	"github.com/vinaycharlie01/jenkins-mcp-go/internal/imagescan"
 	"github.com/vinaycharlie01/jenkins-mcp-go/internal/toolkit"
 )
 
@@ -23,13 +25,30 @@ type API interface {
 	BuildHistory(ctx context.Context, path []string, limit int) ([]client.BuildSummary, error)
 	ConsoleText(ctx context.Context, path []string, ref string, start int64, maxBytes int) (*client.Console, error)
 	Queue(ctx context.Context) ([]client.QueueItem, error)
+	GetArtifact(ctx context.Context, path []string, ref, relativePath string, maxBytes int) ([]byte, bool, error)
+}
+
+// Options configures optional tool behaviour.
+type Options struct {
+	// ImagePattern is the operator's custom image regex (JENKINS_IMAGE_PATTERN).
+	ImagePattern *regexp.Regexp
 }
 
 // Tools holds the dependencies of the Jenkins tools.
-type Tools struct{ api API }
+type Tools struct {
+	api     API
+	scanner imagescan.Scanner
+}
 
 // New returns the Jenkins tool set.
-func New(api API) *Tools { return &Tools{api: api} }
+func New(api API, opts ...Options) *Tools {
+	t := &Tools{api: api}
+	for _, o := range opts {
+		t.scanner.Custom = o.ImagePattern
+	}
+
+	return t
+}
 
 var readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: ptr(true)}
 
@@ -82,6 +101,13 @@ func (t *Tools) Register(s *mcp.Server) {
 		Description: "List builds waiting in the Jenkins queue for jobs in " + scope + ", with the reason they are waiting.",
 		Annotations: readOnly,
 	}, t.getQueue)
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "jenkins_get_build_images", Title: "Jenkins: images a build produced",
+		Description: "Find the container images (repository, tag, registry digest sha256) a build pushed, by scanning the end of its console log " +
+			"(docker push, buildx, kaniko, jib, plus JENKINS_IMAGE_PATTERN) and small image/digest artifacts. Also returns image-related " +
+			"build parameters, display name and Git commit as hints. Pass the returned 'expected' list to argocd_get_images to verify what Argo CD runs.",
+		Annotations: readOnly,
+	}, t.getBuildImages)
 }
 
 func classify(err error) string {
