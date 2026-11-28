@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vinaycharlie01/jenkins-mcp-go/internal/imagescan"
 )
 
 // Jenkins auth modes.
@@ -43,6 +45,9 @@ type Jenkins struct {
 	CAFile             string        // JENKINS_CA_FILE
 	InsecureSkipVerify bool          // JENKINS_INSECURE
 	Timeout            time.Duration // JENKINS_REQUEST_TIMEOUT
+	// ImagePattern is an optional regex (JENKINS_IMAGE_PATTERN) with named
+	// groups image, tag, digest, for pipelines that print images their own way.
+	ImagePattern *regexp.Regexp
 }
 
 // Logging configures structured logging.
@@ -82,6 +87,14 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 	j.CAFile = r.str("JENKINS_CA_FILE", "")
 	j.InsecureSkipVerify = r.boolean("JENKINS_INSECURE", false)
 	j.Timeout = r.duration("JENKINS_REQUEST_TIMEOUT", 30*time.Second)
+
+	if p := r.str("JENKINS_IMAGE_PATTERN", ""); p != "" {
+		re, err := imagescan.CompileCustom(p)
+		if err != nil {
+			r.errs = append(r.errs, fmt.Errorf("JENKINS_IMAGE_PATTERN: %w", err))
+		}
+		j.ImagePattern = re
+	}
 
 	folder, err := SplitJobPath(r.str("JENKINS_BASE_FOLDER", ""))
 	if err != nil {

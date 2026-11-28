@@ -262,3 +262,23 @@ func TestWhoAmI(t *testing.T) {
 		t.Fatalf("%v %+v", err, who)
 	}
 }
+
+func TestGetArtifact(t *testing.T) {
+	var path string
+	c, _ := newClient(t, []string{"TeamA"}, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.EscapedPath()
+		_, _ = w.Write([]byte("0123456789"))
+	})
+	b, trunc, err := c.GetArtifact(context.Background(), []string{"svc"}, "7", "build/out dir/image-digest.txt", 4)
+	if err != nil || string(b) != "0123" || !trunc {
+		t.Fatalf("%q %v %v", b, trunc, err)
+	}
+	if path != "/job/TeamA/job/svc/7/artifact/build/out%20dir/image-digest.txt" {
+		t.Fatalf("path %s", path)
+	}
+	for _, bad := range []string{"../../config.xml", "a//b", "./x"} {
+		if _, _, err := c.GetArtifact(context.Background(), []string{"svc"}, "7", bad, 4); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

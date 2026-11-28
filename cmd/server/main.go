@@ -52,6 +52,9 @@ func run() error {
 	}
 	log.Info("jenkins integration enabled", "url", j.BaseURL, "auth_mode", j.AuthMode,
 		"base_folder", c.BaseFolder(), "auth_input", authInput(j), "timeout", j.Timeout.String())
+	if j.ImagePattern != nil {
+		log.Info("custom image pattern enabled (JENKINS_IMAGE_PATTERN)")
+	}
 	if j.InsecureSkipVerify {
 		log.Warn("TLS verification disabled for Jenkins (JENKINS_INSECURE=true)")
 	}
@@ -60,7 +63,7 @@ func run() error {
 	defer stop()
 	log.Info("starting MCP server", "version", version.Version, "transport", "stdio")
 
-	return transport.RunStdio(ctx, mcp.NewServer(toolsjenkins.New(c)))
+	return transport.RunStdio(ctx, mcp.NewServer(toolsjenkins.New(c, toolsjenkins.Options{ImagePattern: j.ImagePattern})))
 }
 
 func authInput(j config.Jenkins) string {

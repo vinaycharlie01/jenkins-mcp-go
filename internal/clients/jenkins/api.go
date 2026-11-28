@@ -101,6 +101,7 @@ type Build struct {
 		} `json:"lastBuiltRevision,omitempty"`
 		RemoteURLs []string `json:"remoteUrls,omitempty"`
 	} `json:"actions,omitempty"`
+	Artifacts  []Artifact `json:"artifacts,omitempty"`
 	ChangeSets []struct {
 		Items []struct {
 			CommitID string `json:"commitId"`
@@ -110,6 +111,12 @@ type Build struct {
 			} `json:"author"`
 		} `json:"items"`
 	} `json:"changeSets,omitempty"`
+}
+
+// Artifact is an archived build artifact.
+type Artifact struct {
+	FileName     string `json:"fileName"`
+	RelativePath string `json:"relativePath"`
 }
 
 // BuildSummary is one row of the build history.
@@ -157,7 +164,7 @@ const (
 		"property[parameterDefinitions[_class,name,type,description,choices,defaultParameterValue[value]]]," + jobsTree
 	buildTree = "_class,number,url,displayName,description,result,building,duration,estimatedDuration,timestamp,builtOn," +
 		"actions[_class,parameters[name,value],causes[shortDescription,userId,userName],lastBuiltRevision[SHA1,branch[name]],remoteUrls]," +
-		"changeSets[items[commitId,msg,author[fullName]]]"
+		"changeSets[items[commitId,msg,author[fullName]]],artifacts[fileName,relativePath]{0,200}"
 	historyTreeFmt = "builds[number,url,displayName,result,building,timestamp,duration]{0,%d}"
 	queueTree      = "items[id,why,blocked,buildable,stuck,inQueueSince,params,task[name,url]]"
 )
@@ -327,6 +334,38 @@ func trimPartialRune(b []byte) []byte {
 	}
 
 	return b
+}
+
+// GetArtifact reads up to maxBytes of an archived artifact of a build.
+// relativePath comes from Build.Artifacts; every segment is escaped.
+func (c *Client) GetArtifact(ctx context.Context, path []string, ref, relativePath string, maxBytes int) ([]byte, bool, error) {
+	if len(path) == 0 || !ValidBuildRef(ref) {
+		return nil, false, fmt.Errorf("invalid job path or build %q", ref)
+	}
+	segs := append([]string{ref, "artifact"}, strings.Split(relativePath, "/")...)
+	for _, s := range segs[2:] {
+		if s == "" || s == "." || s == ".." {
+			return nil, false, fmt.Errorf("invalid artifact path %q", relativePath)
+		}
+	}
+	u, err := c.jobURL(path, segs...)
+	if err != nil {
+		return nil, false, err
+	}
+	resp, err := c.send(ctx, u)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)+1))
+	if err != nil {
+		return nil, false, fmt.Errorf("read artifact: %w", err)
+	}
+	if len(b) > maxBytes {
+		return b[:maxBytes], true, nil
+	}
+
+	return b, false, nil
 }
 
 // Queue returns queued items; with a base folder, only items inside it.

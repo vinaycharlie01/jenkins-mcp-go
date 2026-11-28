@@ -20,6 +20,8 @@ type fakeAPI struct {
 	console  *client.Console
 	queue    []client.QueueItem
 	who      *client.WhoAmI
+	files    map[string]string
+	refs     []string
 	err      error
 	calls    int
 	path     []string
@@ -71,6 +73,7 @@ func (f *fakeAPI) BuildHistory(_ context.Context, p []string, limit int) ([]clie
 func (f *fakeAPI) ConsoleText(_ context.Context, p []string, ref string, start int64, maxBytes int) (*client.Console, error) {
 	f.calls++
 	f.path, f.ref, f.start, f.maxBytes = p, ref, start, maxBytes
+	f.refs = append(f.refs, ref)
 
 	return f.console, f.err
 }
@@ -81,10 +84,21 @@ func (f *fakeAPI) Queue(context.Context) ([]client.QueueItem, error) {
 	return f.queue, f.err
 }
 
-func session(t *testing.T, api API) *mcp.ClientSession {
+func (f *fakeAPI) GetArtifact(_ context.Context, p []string, ref, rel string, _ int) ([]byte, bool, error) {
+	f.calls++
+	f.refs = append(f.refs, ref)
+	c, ok := f.files[rel]
+	if !ok {
+		return nil, false, &client.APIError{Status: 404, Reason: "x"}
+	}
+
+	return []byte(c), false, nil
+}
+
+func session(t *testing.T, api API, opts ...Options) *mcp.ClientSession {
 	t.Helper()
 	s := mcp.NewServer(&mcp.Implementation{Name: "test"}, nil)
-	New(api).Register(s)
+	New(api, opts...).Register(s)
 	ct, st := mcp.NewInMemoryTransports()
 	if _, err := s.Connect(context.Background(), st, nil); err != nil {
 		t.Fatal(err)
@@ -147,7 +161,7 @@ func TestToolsRegisteredReadOnly(t *testing.T) {
 			t.Errorf("description should name the base folder: %s", tl.Description)
 		}
 	}
-	want := "jenkins_get_build_history,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_list_jobs,jenkins_whoami"
+	want := "jenkins_get_build_history,jenkins_get_build_images,jenkins_get_build_info,jenkins_get_console_logs,jenkins_get_job_info,jenkins_get_queue_info,jenkins_list_jobs,jenkins_whoami"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("%v", names)
 	}
