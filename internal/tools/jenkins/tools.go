@@ -114,6 +114,7 @@ func (t *Tools) Register(s *mcp.Server) {
 		Annotations: readOnly,
 	}, t.getBuildImages)
 	t.registerDebugTools(s)
+	t.registerAnalyzeBuildLogs(s)
 }
 
 func classify(err error) string {

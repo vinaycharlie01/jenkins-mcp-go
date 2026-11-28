@@ -37,6 +37,36 @@ Notes:
 - **Step logs:** Jenkins' `wfapi/log` returns about **the last 10 KB** of a step's output, as HTML (the limit can be changed with the `com.cloudbees.workflow.rest.external.FlowNodeLogExt.maxReturnChars` system property). The tool converts it to plain text and sets `logTruncated`. Use `jenkins_get_console_logs` for the full log.
 - **Suggested flow for "why did it fail?":** `jenkins_get_failed_stages` → `jenkins_get_failed_step_logs` → `jenkins_get_test_failures` (if tests failed) → `jenkins_compare_builds` (what changed since the last green build).
 
+## Build log analysis (`jenkins_analyze_build_logs`)
+
+This tool analyses a build's **full console log** and returns compact, structured results instead of the raw log. It reads the end of the log (`scan_bytes`, default 8 MiB, max 32 MiB) through the same `progressiveText` API as `jenkins_get_console_logs`, and is read-only. Jenkins console logs are often many MB, so this is the tool to use instead of reading raw output.
+
+| `analysis_type` | Returns |
+|---|---|
+| `overview` (default) | Result, stages, failing stage, and the **likely root cause** line with its stage, command and context |
+| `errors` | CI error lines classified and grouped, most specific first: `credentials`, `permission`, `network`, `resources`, `git`, `docker`, `dependency`, `compile`, `pipeline_script`, `test`, `quality`, `timeout`, `build_tool`, `aborted`, `error`, `script_exit` |
+| `stages` | Per Pipeline stage or parallel branch: line range, line count, duration, error lines, exit code, last shell command |
+| `tests` | Failed tests (Go, JUnit/Maven, pytest, Jest, Gradle, .NET) and the last JUnit totals line |
+| `exceptions` | Java/Groovy/Python exceptions grouped by type, with root cause and sample stack |
+| `patterns` | Repeated lines with numbers, IDs, timestamps and URLs normalized |
+| `search` | Keyword and/or minimum `level`, with `context_lines` (0–5), paginated |
+| `sample` | Redacted raw lines, newest first. Only when really needed |
+| `all` | Everything except `sample` |
+
+**How the likely cause is chosen:** the failing stage is the one whose `sh` step reported `script returned exit code N`, or else the last stage with errors. Within it, the most *specific* error wins, because "exit code 1" and "BUILD FAILURE" are symptoms rather than causes. A `connection refused` before 40 failing tests is therefore reported as the cause.
+
+**How the console is parsed:**
+- `[Pipeline] { (Stage)` / `[Pipeline] }` markers attribute every line to its stage or parallel branch. The marker lines themselves are left out of the analysis.
+- Timestamper prefixes are parsed: ISO (`[2026-03-01T10:00:00.000Z]`) or time-only (`10:00:00`).
+- Hidden console notes (`ESC[8mha:…`) and ANSI colours are removed.
+- `+ cmd` lines become each stage's last command (redacted).
+- `stage` filters the analysis to one stage or branch.
+
+**Limits:**
+- Results are bounded by `max_results` (default 20, max 200) and paged with `offset` / `next_offset`. Texts are size-capped, and secrets are redacted (tokens, passwords, auth headers, cookies, JWTs, keys, URL credentials).
+- `summary.partial_log` is `true` when only the end of a larger log was read. Early stage markers may then be missing, and you can raise `scan_bytes`.
+- **Performance:** a 3 MB, 45,000-line console is analysed in about 1 s. Each error rule's regex only runs when one of its keywords appears in the line.
+
 ## Images a build produced (`jenkins_get_build_images`)
 
 The tool reads the **end of the console log** (default 4 MiB, `scanBytes` up to 32 MiB) and small image or digest artifacts, and recognizes:
@@ -228,6 +258,8 @@ internal/clients/jenkins/  REST client: base-folder scoping, tree projections, c
 internal/tools/jenkins/    MCP tool definitions, input validation, response shaping
 internal/imageref/         image reference parsing/normalization (tag, registry digest)
 internal/imagescan/        finds pushed images in console logs and artifacts
+internal/consolelog/       Jenkins console parsing: stages, Timestamper, commands, CI error rules, failed tests
+internal/loganalysis/      generic log analysis (levels, exceptions, patterns, search, redaction) shared with argocd-mcp-go
 internal/toolkit/          error envelope and validators
 internal/mcp/              builds the MCP server from tool sets
 internal/transport/        stdio (an HTTP transport can be added here)
