@@ -108,6 +108,7 @@ func (t *Tools) Register(s *mcp.Server) {
 			"build parameters, display name and Git commit as hints. Pass the returned 'expected' list to argocd_get_images to verify what Argo CD runs.",
 		Annotations: readOnly,
 	}, t.getBuildImages)
+	t.registerAnalyzeBuildLogs(s)
 }
 
 func classify(err error) string {
